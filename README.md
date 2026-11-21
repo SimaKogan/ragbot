@@ -1,134 +1,88 @@
-# Order Desk
+**English** | [Русский](README.ru.md)
 
-A small Salesforce app that turns the products of an **Opportunity** into a customer **purchase**: pick products, collect them in a cart, submit, and the customer gets a receipt by email.
+# RagBot: a RAG chatbot for Telegram & Slack with an admin dashboard
 
-Built by **Serafima Kogan** ([@SimaKogan](https://github.com/SimaKogan), serafima.kogan@gmail.com).
+![RagBot](docs/social-preview.png)
 
-## Screenshots
+RagBot answers questions from **your own documents** and shows the sources behind every answer. Upload PDF, DOCX, Markdown or text files, ask questions in Telegram, Slack or the built-in sandbox, and rate each answer with 👍/👎. The dashboard turns those ratings into a per-document quality report, so you can see which files make answers worse.
 
-> These are **UI previews rendered locally from a static mock with sample data** (same layout, same numbers as `scripts/apex/seed-demo-data.apex`), not captures of a live org. Replace them with real captures after your first deploy; the file names can stay the same.
+**Stack:** Java 17 · Spring Boot 3.4 · Spring AI 1.0 · Gemini 2.5 Flash and text-embedding-005 (Vertex AI) · PostgreSQL + pgvector · React 18 + TypeScript + Vite · Docker Compose
 
-| Cart with items | Empty cart |
+## How it works
+
+![Architecture](docs/architecture.png)
+
+1. **Ingestion.** An uploaded file is parsed with Apache Tika, split into chunks (`TokenTextSplitter`), embedded with `text-embedding-005` (768 dimensions) and stored in pgvector (HNSW index, cosine distance).
+2. **Retrieval.** A question is embedded and the top 5 chunks with similarity of at least 0.55 are fetched.
+3. **Generation.** Gemini 2.5 Flash (temperature 0.2) is told to answer only from the retrieved context and to cite sources as `[file_name]`. If nothing passes the threshold, the bot says it has no information and **does not call the model at all**.
+4. **Logging.** Each exchange is saved as a `MessageLog` row: question, answer, sources with snippets and scores, latency, channel and the user's 👍/👎.
+
+## Dashboard
+
+The UI language is Russian; there is a dark and a light theme. Screenshots below use demo data.
+
+| Overview | Conversations and sources |
 | --- | --- |
-| ![Order Desk](docs/screenshots/desk.png) | ![Empty cart](docs/screenshots/empty-cart.png) |
+| ![Overview](docs/screenshots/dashboard-overview.png) | ![Answer with sources](docs/screenshots/dashboard-answer-sources.png) |
+| **Knowledge base** | **Sandbox** |
+| ![Knowledge base](docs/screenshots/dashboard-knowledge.png) | ![Sandbox](docs/screenshots/dashboard-playground.png) |
 
-| Nothing selected yet | Submitted, with the receipt email |
-| --- | --- |
-| ![Select an opportunity](docs/screenshots/select-opportunity.png) | ![Receipt](docs/screenshots/receipt.png) |
+- **Overview:** total questions, last 24 hours, share of answers that had sources, satisfaction, 👍/👎 counts, average latency, number of documents, a 7-day chart, and quality per document.
+- **Conversations:** all messages with filters *All*, *👎 To review* and *👍 Good*. Click a row to see the answer, its sources with relevance scores, and rate it.
+- **Knowledge base:** upload (up to 20 MB) and delete documents.
+- **Sandbox:** the same RAG pipeline without a messenger.
 
-## What it does
+## Quick start
 
-1. Open the **Order Desk** app and choose an open opportunity (or drop the component on an Opportunity record page).
-2. Enter quantities next to its products and choose **Add to cart**. Quantities are checked against what is still available.
-3. Review the cart, remove lines if needed, enter the receipt address and **Submit purchase**.
-4. The purchase becomes `Submitted`, the date is stamped, and a plain-text receipt is emailed.
-
-Opportunity products are never modified. Stock is tracked by *reserving* quantities on purchase lines, so cancelling a purchase releases its units again.
-
-## Built with
-
-- **Apex**: Java-style, strongly typed server code (service layer, bulk-safe trigger, tests)
-- **JavaScript**: Lightning Web Components (ES modules, async/await, custom events)
-- **Node.js tooling**: Jest, ESLint and Prettier for the front-end code
-- **Salesforce DX**: source-format project, scratch org, `sf` CLI
-
-## Data model
-
-```mermaid
-erDiagram
-    Account ||--o{ Purchase__c : "Account__c"
-    Opportunity ||--o{ Purchase__c : "Opportunity__c"
-    Purchase__c ||--|{ Purchase_Line__c : "master-detail"
-    Product2 |o--o{ Purchase_Line__c : "Product__c"
-```
-
-| Object | Notable fields |
-| --- | --- |
-| `Purchase__c` | `Status__c` (Draft / Submitted / Cancelled), `Receipt_Email__c`, `Submitted_On__c`, `Receipt_Sent__c`, `Total_Amount__c` (roll-up) |
-| `Purchase_Line__c` | `Quantity__c`, `Unit_Price__c`, `Line_Total__c` (formula), `Opportunity_Product_Id__c`, `Line_Key__c` (unique: one line per product per purchase) |
-
-Also included: validation rules, page layouts, a list view, the **Order Desk** Lightning app, tabs, a Lightning app page, and two permission sets.
-
-| Permission set | Grants |
-| --- | --- |
-| `Order_Desk_User` | create/read/edit purchases, create/read/edit/delete lines, the app and tabs, the Apex controller |
-| `Order_Desk_Manager` | everything above plus view-all and delete on purchases |
-
-Users also need read access to Accounts, Opportunities and Products (the Standard User profile has it).
-
-## Apex
-
-| Class | Role |
-| --- | --- |
-| `PurchaseTrigger` + `PurchaseTriggerHandler` | Bulk-safe life cycle guard: created as Draft, Draft → Submitted/Cancelled, Submitted → Cancelled, account and opportunity fixed, a submit needs at least one line (one aggregate query for any number of records) |
-| `OrderDeskService` | Business logic: desk state, add to cart (fixed number of queries and DML for any number of lines), remove line, submit one or many purchases |
-| `ReceiptMailer` | One `Messaging.sendEmail` call for a whole batch; sets `Receipt_Sent__c` only for emails that were accepted |
-| `OrderDeskController` | Thin `@AuraEnabled` facade; business errors are shown as-is, anything unexpected is logged and replaced by a generic message |
-
-Queries and DML run in **user mode** (`WITH USER_MODE`, `insert as user`), and classes are `with sharing`, so field-level security, object permissions and sharing of the running user always apply.
-
-## Lightning Web Components
-
-| Component | Role |
-| --- | --- |
-| `orderDesk` | Container: opportunity picker, summary, loading and error handling, toasts |
-| `orderLineList` | Products with available units and quantity inputs (values are clamped to what is available) |
-| `cartPanel` | Cart lines, total, receipt address, submit |
-| `emptyState` | Reusable empty state with an inline SVG |
-| `errorUtils` | Shared error-message helper |
-
-No `eval`, no `setTimeout`, no external CDNs or static resources. Child components talk to the container through events, so there is no message channel to maintain.
-
-## Deploy
-
-Requires the [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) (`sf`).
+1. In Google Cloud, enable the Vertex AI API, create a service account with the **Vertex AI User** role and download its key as `gcp.json`.
+2. Run `cp .env.example .env` and fill in the values (get the bot token from @BotFather).
+3. Run `docker compose up --build`. The dashboard is at http://localhost:8080 (log in with `ADMIN_TOKEN`).
+4. Upload documents in the **Knowledge base** tab and check the answers in the **Sandbox**.
+5. Connect Telegram (needs a public HTTPS URL; locally use ngrok or cloudflared):
 
 ```bash
-# 1. scratch org (or log in to a sandbox / Developer Edition org instead)
-sf org create scratch --definition-file config/project-scratch-def.json --alias order-desk --set-default
-
-# 2. deploy everything
-sf project deploy start
-
-# 3. give yourself access and load demo data
-sf org assign permset --name Order_Desk_Manager
-sf apex run --file scripts/apex/seed-demo-data.apex
-
-# 4. open the org, then launch the "Order Desk" app
-sf org open
+curl "https://api.telegram.org/bot$TELEGRAM_TOKEN/setWebhook" \
+  -d url=https://<host>/api/telegram/webhook -d secret_token=$TELEGRAM_WEBHOOK_SECRET
 ```
 
-## Tests
+Before exposing the app, replace the `change-me` defaults for `ADMIN_TOKEN` and `TELEGRAM_WEBHOOK_SECRET`.
 
-```bash
-# Apex: runs every test and reports coverage per class
-sf apex run test --test-level RunLocalTests --code-coverage --result-format human --wait 10
+## Slack
 
-# Lightning Web Components
-npm install
-npm run lint
-npm run test:unit:coverage
-```
+1. Go to https://api.slack.com/apps → Create New App → From scratch.
+2. OAuth & Permissions → Bot Token Scopes: `chat:write`, `app_mentions:read`, `im:history` → Install to Workspace → put the `xoxb-…` token into `SLACK_BOT_TOKEN`.
+3. Basic Information → Signing Secret → `SLACK_SIGNING_SECRET`.
+4. Event Subscriptions → Request URL `https://<host>/api/slack/events` → bot events: `app_mention`, `message.im`.
+5. Interactivity & Shortcuts → Request URL `https://<host>/api/slack/interactions` (👍/👎 buttons).
+6. App Home → enable the Messages Tab and allow users to message the bot. The bot replies in a thread when mentioned and in direct messages.
 
-The Apex suite covers the service, trigger, mailer and controller, including a 200-record trigger run, a 100-line bulk add with query and DML limit assertions, and a user without permissions. Check the coverage report on your org; the target is above 85 %.
+## Answer quality feedback
 
-## Project layout
+Every answer carries 👍/👎: inline buttons in Telegram, Block Kit buttons in Slack (both disappear after a click), and buttons in the dashboard and sandbox. The rating is stored in `MessageLog.feedback`. The dashboard shows:
 
-```
-force-app/main/default
-├── applications/   Order Desk app
-├── classes/        service, controller, mailer, trigger handler + tests
-├── flexipages/     Order Desk app page
-├── layouts/ objects/ permissionsets/ tabs/
-├── lwc/            orderDesk, orderLineList, cartPanel, emptyState, errorUtils (+ Jest tests)
-└── triggers/       PurchaseTrigger
-```
+- **Satisfaction** = 👍 / (👍 + 👎) over 7 days, plus the number of ratings;
+- **Quality per document**: 👍/👎 among answers where the document was a source, sorted by the number of 👎;
+- **Conversations → "👎 To review"**: a queue of bad answers with their sources and scores.
 
-## Notes
+## Security
 
-- Email deliverability must allow sending (Setup → Deliverability). When it does not, the purchase is still submitted and the app tells the user the receipt could not be sent.
-- API version 62.0.
+- `/api/**` (dashboard API) requires the `X-Admin-Token` header.
+- The Telegram webhook checks `X-Telegram-Bot-Api-Secret-Token` with a constant-time comparison.
+- Slack requests are verified with `X-Slack-Signature` (HMAC-SHA256, 5-minute window against replay); Slack retries are ignored.
+- All secrets come from environment variables; `.env` and `gcp.json` are git-ignored.
+- Webhooks are acknowledged immediately and processed on a background thread pool, because Slack requires an answer within 3 seconds.
 
-## License
+## Development
 
-MIT, see [LICENSE](LICENSE).
+- Backend: `cd backend && mvn spring-boot:run` (needs a running database: `docker compose up db`)
+- Tests: `cd backend && mvn test` (Slack signature verification and the admin token filter)
+- Dashboard: `cd dashboard && npm install && npm run dev` (proxies to :8080)
+- Health: `/actuator/health`
+
+## Limitations and roadmap
+
+- Each question is answered independently, with no conversation history.
+- The dashboard uses one shared admin token instead of user accounts.
+- The schema is created by Hibernate (`ddl-auto: update`) and there are no integration tests yet.
+
+Planned: response streaming, automatic LLM-as-judge quality scoring (faithfulness / relevance) on top of manual 👍/👎, Flyway migrations, Testcontainers tests, and virtual threads on Java 21.
