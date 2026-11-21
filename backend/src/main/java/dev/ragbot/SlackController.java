@@ -21,6 +21,7 @@ import org.springframework.web.client.RestClient;
 public class SlackController {
     private static final Logger log = LoggerFactory.getLogger(SlackController.class);
 
+    private static final java.util.concurrent.Executor ASYNC = java.util.concurrent.Executors.newFixedThreadPool(16);
     private final RagService rag;
     private final AppProps props;
     private final ObjectMapper json;
@@ -45,7 +46,7 @@ public class SlackController {
         String type = e.path("type").asText();
         boolean dm = "message".equals(type) && "im".equals(e.path("channel_type").asText())
                 && !e.has("bot_id") && !e.has("subtype");
-        if (dm || "app_mention".equals(type)) Thread.startVirtualThread(() -> handle(e));  // Slack требует ack < 3 c
+        if (dm || "app_mention".equals(type)) ASYNC.execute(() -> handle(e));  // Slack требует ack < 3 c
         return ResponseEntity.ok().build();
     }
 

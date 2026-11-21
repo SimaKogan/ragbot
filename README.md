@@ -1,6 +1,6 @@
 # RagBot — Telegram-бот с RAG на Vertex AI + панель управления
 
-Spring Boot 3.4 · Java 21 · Spring AI 1.0 · Gemini (Vertex AI) · pgvector · React 18 + Vite
+Spring Boot 3.4 · Java 17 · Spring AI 1.0 · Gemini (Vertex AI) · pgvector · React 18 + Vite
 
 ```
 Telegram ─webhook─▶ TelegramController ─┐
@@ -48,7 +48,7 @@ curl "https://api.telegram.org/bot$TELEGRAM_TOKEN/setWebhook" \
 ## Что делает проект сильнее исходника
 | watsonwork-spring-boot (2017) | RagBot |
 |---|---|
-| Java 8, Gradle, Retrofit | Java 21, виртуальные потоки, Spring AI |
+| Java 8, Gradle, Retrofit | Java 17, Spring AI |
 | Эхо-логика, платформа закрыта | RAG с источниками, Gemini на Vertex AI, Telegram + Slack |
 | Секреты в `application.yml` | Только переменные окружения, токен панели, проверка secret вебхука |
 | Нет UI (Thymeleaf-заглушка) | React-панель: метрики, история, источники, база знаний, метрика качества 👍/👎, тёмная тема |

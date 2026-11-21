@@ -22,6 +22,7 @@ public class TelegramController {
         public record CallbackQuery(String id, String data, Message message) {}
     }
 
+    private static final java.util.concurrent.Executor ASYNC = java.util.concurrent.Executors.newFixedThreadPool(16);
     private final RagService rag;
     private final AppProps props;
     private final RestClient http;
@@ -35,9 +36,9 @@ public class TelegramController {
     public ResponseEntity<Void> webhook(@RequestHeader(value = "X-Telegram-Bot-Api-Secret-Token", required = false) String secret,
                                         @RequestBody Update update) {
         if (!safeEquals(props.telegram().secret(), secret)) return ResponseEntity.status(401).build();
-        // Telegram ждёт быстрый 200, поэтому работаем в виртуальном потоке.
-        if (update.callback_query() != null) Thread.startVirtualThread(() -> feedback(update.callback_query()));
-        else if (update.message() != null && update.message().text() != null) Thread.startVirtualThread(() -> handle(update.message()));
+        // Telegram ждёт быстрый 200, поэтому работаем асинхронно.
+        if (update.callback_query() != null) ASYNC.execute(() -> feedback(update.callback_query()));
+        else if (update.message() != null && update.message().text() != null) ASYNC.execute(() -> handle(update.message()));
         return ResponseEntity.ok().build();
     }
 
